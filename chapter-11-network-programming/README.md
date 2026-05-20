@@ -1,0 +1,331 @@
+# Chapter 11: Network Programming
+
+## Scope
+
+This chapter explains how network applications are built using the client-server model and the sockets interface. It connects earlier systems concepts—processes, Unix I/O, byte ordering, signals, and dynamic memory—with practical Internet programming.
+
+The chapter covers networks, IP addresses, domain names, TCP connections, sockets, host/service conversion, HTTP, web servers, static and dynamic content, and the Tiny web server example.
+
+## Key ideas
+
+### 1. Network applications use the client-server model
+
+A network application usually consists of:
+
+```text
+server process   manages a resource and offers a service
+client process   requests service from the server
+```
+
+Examples:
+
+```text
+Web server       serves files and dynamic content
+FTP server       stores and retrieves files
+email server     stores and forwards messages
+```
+
+Basic flow:
+
+```text
+client sends request -> server processes request -> server sends response
+```
+
+### 2. A network is a hierarchy of connected systems
+
+At the hardware level, networks move bits between machines. At the programming level, the important abstraction is that processes on different machines can communicate using sockets.
+
+Conceptual path:
+
+```text
+client process
+  -> client socket
+  -> network adapters/routers
+  -> server socket
+  -> server process
+```
+
+The network hides many physical details behind a byte-stream or datagram abstraction.
+
+### 3. The Internet identifies hosts with IP addresses
+
+An IP address identifies a host interface on the Internet. IPv4 addresses are 32-bit values, often written in dotted-decimal notation:
+
+```text
+127.0.0.1
+192.168.1.10
+```
+
+Programs should use standard conversion functions instead of manually parsing addresses.
+
+### 4. Domain names map human-readable names to addresses
+
+Domain names are easier for humans than numeric IP addresses.
+
+```text
+www.example.com -> one or more IP addresses
+```
+
+DNS provides this mapping. A single domain name may map to multiple addresses for load balancing or availability.
+
+### 5. Internet connections are identified by socket pairs
+
+A TCP connection is identified by the pair of endpoints:
+
+```text
+(client IP, client port) <-> (server IP, server port)
+```
+
+A port identifies a service on a host.
+
+Common examples:
+
+```text
+80    HTTP
+443   HTTPS
+22    SSH
+```
+
+### 6. Sockets are file descriptors for network communication
+
+On Unix systems, sockets use the file descriptor abstraction. This means programs can often use familiar I/O functions such as `read`, `write`, and robust I/O wrappers.
+
+Create a socket:
+
+```c
+int clientfd = socket(AF_INET, SOCK_STREAM, 0);
+```
+
+For TCP/IP:
+
+```text
+AF_INET / AF_INET6       address family
+SOCK_STREAM              reliable byte stream, usually TCP
+```
+
+### 7. Client sockets use `connect`
+
+A client creates a socket and connects it to a server.
+
+Conceptual client flow:
+
+```text
+socket -> connect -> read/write -> close
+```
+
+Example idea:
+
+```c
+int clientfd = socket(AF_INET, SOCK_STREAM, 0);
+connect(clientfd, (struct sockaddr *)&serveraddr, sizeof(serveraddr));
+write(clientfd, request, request_len);
+read(clientfd, response, sizeof(response));
+close(clientfd);
+```
+
+### 8. Server sockets use `bind`, `listen`, and `accept`
+
+A server prepares a listening socket, then repeatedly accepts client connections.
+
+Conceptual server flow:
+
+```text
+socket -> bind -> listen -> accept -> read/write connected descriptor -> close
+```
+
+Important distinction:
+
+```text
+listening descriptor   waits for connection requests
+connected descriptor   communicates with one client
+```
+
+Example loop:
+
+```c
+while (1) {
+    int connfd = accept(listenfd, NULL, NULL);
+    handle_client(connfd);
+    close(connfd);
+}
+```
+
+### 9. Use modern host/service conversion functions
+
+Rather than hard-coding address structures, use protocol-independent helpers.
+
+Common functions:
+
+```text
+getaddrinfo      host/service -> socket address list
+getnameinfo      socket address -> host/service strings
+```
+
+These support IPv4 and IPv6 and make code more portable.
+
+### 10. CS:APP wrappers simplify socket setup
+
+The book introduces helper functions such as:
+
+```text
+open_clientfd(hostname, port)
+open_listenfd(port)
+```
+
+These hide repetitive socket setup details so examples can focus on client-server logic.
+
+### 11. HTTP is a request-response protocol
+
+A browser connects to a web server, sends an HTTP request, and receives an HTTP response.
+
+Simple request:
+
+```http
+GET /index.html HTTP/1.0
+Host: example.com
+
+```
+
+Simple response:
+
+```http
+HTTP/1.0 200 OK
+Content-type: text/html
+Content-length: 42
+
+<html>...</html>
+```
+
+HTTP messages contain a start line, headers, a blank line, and optional body content.
+
+### 12. Web content can be static or dynamic
+
+Static content is stored in files:
+
+```text
+HTML files
+images
+CSS
+JavaScript
+plain text
+```
+
+Dynamic content is generated by running a program or application logic.
+
+Example:
+
+```text
+/static/logo.png     server reads file and returns bytes
+/cgi-bin/adder?1&2   server runs/generates result dynamically
+```
+
+### 13. Serving static content requires file metadata and I/O
+
+A web server must check the requested path, verify permissions/type, determine file size, send headers, and copy file bytes to the client.
+
+Conceptual static flow:
+
+```text
+parse URI
+map URI to local filename
+stat file
+send HTTP response headers
+send file contents
+```
+
+### 14. Serving dynamic content uses process control
+
+Dynamic content can be produced by a child process. The server sets environment variables, redirects output to the connected socket, and runs a program.
+
+Conceptual CGI-style flow:
+
+```text
+fork child
+child sets environment variables
+child dup2(connfd, STDOUT_FILENO)
+child execve(dynamic program)
+parent waits/reaps child
+```
+
+This combines networking, Unix I/O, processes, and `execve`.
+
+### 15. Tiny web server integrates earlier chapters
+
+The Tiny server in CS:APP is small but demonstrates real systems ideas:
+
+```text
+sockets for network connections
+RIO for robust I/O
+stat/open/read/write for files
+fork/execve for dynamic content
+HTTP parsing and response formatting
+```
+
+It is intentionally simple and sequential, so later concurrency techniques can improve it.
+
+## Mini examples
+
+### Minimal client-server shape
+
+Client:
+
+```c
+int fd = open_clientfd("example.com", "80");
+rio_writen(fd, "GET / HTTP/1.0
+
+", 18);
+/* read response */
+close(fd);
+```
+
+Server:
+
+```c
+int listenfd = open_listenfd("8080");
+while (1) {
+    int connfd = accept(listenfd, NULL, NULL);
+    handle_client(connfd);
+    close(connfd);
+}
+```
+
+### HTTP line endings
+
+HTTP uses CRLF line endings:
+
+```text
+
+
+```
+
+A blank line marks the end of request or response headers:
+
+```http
+GET / HTTP/1.0
+
+Host: localhost
+
+
+
+```
+
+### Listening vs connected descriptor
+
+```text
+listenfd: stays open for accepting future clients
+connfd:   one per client connection, close after response
+```
+
+Closing `connfd` after a response does not close the server's listening socket.
+
+## What to remember
+
+- Network applications usually follow the client-server model.
+- TCP connections are identified by client/server IP addresses and ports.
+- Sockets are file descriptors, so Unix I/O concepts apply to networking.
+- Clients use `socket` and `connect`; servers use `socket`, `bind`, `listen`, and `accept`.
+- Use `getaddrinfo`/`getnameinfo` or wrappers for portable host and service conversion.
+- A listening descriptor accepts new connections; a connected descriptor communicates with one client.
+- HTTP is a text-based request-response protocol with headers and optional body content.
+- Static web content is read from files; dynamic content is generated by programs.
+- Tiny web server ties together sockets, robust I/O, file metadata, process control, and HTTP.
